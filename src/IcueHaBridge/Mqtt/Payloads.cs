@@ -65,11 +65,40 @@ namespace IcueHaBridge.Mqtt
                 supported_color_modes = new[] { "rgb" },
                 effect = true,
                 effect_list = EffectCatalog.Names(),
-                icon = "mdi:keyboard-variant",
+                icon = IconFor(displayName),
                 device = DeviceBlock(),
                 origin = OriginBlock()
             };
             return JsonSerializer.Serialize(payload);
+        }
+
+        /// <summary>
+        /// Picks an icon from the model name, so a mouse does not show up as a keyboard.
+        /// </summary>
+        private static string IconFor(string model)
+        {
+            string name = (model ?? "").ToLowerInvariant();
+            if (Mentions(name, "all devices")) { return "mdi:lightbulb-group"; }
+            if (Mentions(name, "mouse", "nightsabre", "sabre", "scimitar", "ironclaw", "harpoon",
+                               "katar", "darkstar", "m65", "glaive")) { return "mdi:mouse"; }
+            if (Mentions(name, "headset", "virtuoso", "void", "hs50", "hs60", "hs70", "hs80")) { return "mdi:headphones"; }
+            if (Mentions(name, "dominator", "vengeance", "ram", "memory")) { return "mdi:memory"; }
+            if (Mentions(name, "mm", "mousepad", "mouse pad", "polaris")) { return "mdi:rug"; }
+            if (Mentions(name, "hub", "commander", "lighting node", "link")) { return "mdi:hubspot"; }
+            if (Mentions(name, "fan", "ql", "ll120", "sp120", "capellix", "h100", "h115", "h150")) { return "mdi:fan"; }
+            return "mdi:keyboard-variant";
+        }
+
+        private static bool Mentions(string haystack, params string[] needles)
+        {
+            foreach (string needle in needles)
+            {
+                if (haystack.Contains(needle))
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         /// <summary>

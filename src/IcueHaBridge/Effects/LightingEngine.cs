@@ -17,6 +17,12 @@ namespace IcueHaBridge.Effects
         /// <summary>Name of the entity that drives every device at once.</summary>
         public const string AllSlug = "all";
 
+        /// <summary>How often the layer priority is claimed again, in seconds.</summary>
+        private const int LayerReassertSeconds = 5;
+
+        /// <summary>How often iCUE is asked whether it is still there, in seconds.</summary>
+        private const int AliveCheckSeconds = 10;
+
         private readonly IcueController controller;
         private readonly ILogger logger;
         private readonly int framesPerSecond;
@@ -167,6 +173,8 @@ namespace IcueHaBridge.Effects
             Stopwatch clock = Stopwatch.StartNew();
             EffectFrame frame = new EffectFrame();
             DateTime nextConnectionAttempt = DateTime.MinValue;
+            DateTime nextLayerReassert = DateTime.MinValue;
+            DateTime nextAliveCheck = DateTime.UtcNow.AddSeconds(AliveCheckSeconds);
 
             while (!cancellationToken.IsCancellationRequested)
             {
@@ -206,14 +214,34 @@ namespace IcueHaBridge.Effects
 
                 controller.SetInFront(anyOn);
 
+                // Restarting iCUE silently drops our layer priority, so it is claimed again
+                // regularly instead of only when the state changes.
+                if (DateTime.UtcNow >= nextLayerReassert)
+                {
+                    nextLayerReassert = DateTime.UtcNow.AddSeconds(LayerReassertSeconds);
+                    controller.ReassertLayer();
+                }
+
+                // While nothing is being drawn, nothing would notice iCUE going away.
+                if (DateTime.UtcNow >= nextAliveCheck)
+                {
+                    nextAliveCheck = DateTime.UtcNow.AddSeconds(AliveCheckSeconds);
+                    if (!controller.CheckAlive())
+                    {
+                        logger.LogInformation("iCUE is no longer answering, waiting for it to come back.");
+                        continue;
+                    }
+                }
+
                 if (anyOn && (anyAnimated || needsRedraw))
                 {
                     needsRedraw = false;
                     frame.TimeSeconds = clock.Elapsed.TotalSeconds;
                     RenderAll(snapshot, frame);
-                    if (!controller.Flush(snapshot) && !controller.IsConnected)
+                    if (!controller.Flush(snapshot))
                     {
-                        logger.LogWarning("Lost the connection to iCUE, will reconnect.");
+                        logger.LogWarning("Lost the link to iCUE ({Reason}), reconnecting.", controller.ProtocolSummary);
+                        nextConnectionAttempt = DateTime.MinValue;
                         continue;
                     }
                 }

@@ -26,6 +26,7 @@ namespace IcueHaBridge.Icue
 
         private readonly object sync = new object();
         private bool isInFront;
+        private bool wantsInFront;
 
         /// <summary>Whether iCUE answered the last handshake.</summary>
         public bool IsConnected { get; private set; }
@@ -204,12 +205,53 @@ namespace IcueHaBridge.Icue
         {
             lock (sync)
             {
+                wantsInFront = inFront;
                 if (!IsConnected || inFront == isInFront)
                 {
                     return;
                 }
                 CorsairLightingSDK.SetLayerPriority(inFront ? LayerInFront : LayerBehind);
                 isInFront = inFront;
+            }
+        }
+
+        /// <summary>
+        /// Sets the layer again even when nothing changed on our side. Restarting iCUE wipes the
+        /// priority we asked for, and nothing tells us it happened, so it is simply re-applied
+        /// from time to time.
+        /// </summary>
+        public void ReassertLayer()
+        {
+            lock (sync)
+            {
+                if (!IsConnected)
+                {
+                    return;
+                }
+                CorsairLightingSDK.SetLayerPriority(wantsInFront ? LayerInFront : LayerBehind);
+                isInFront = wantsInFront;
+            }
+        }
+
+        /// <summary>
+        /// Checks iCUE is still answering, so that closing it is noticed even while idle.
+        /// </summary>
+        /// <returns><c>true</c> when iCUE is still there.</returns>
+        public bool CheckAlive()
+        {
+            lock (sync)
+            {
+                if (!IsConnected)
+                {
+                    return false;
+                }
+                CorsairProtocolDetails details = CorsairLightingSDK.PerformProtocolHandshake();
+                if (details.ServerProtocolVersion == 0)
+                {
+                    MarkLost("iCUE stopped answering");
+                    return false;
+                }
+                return true;
             }
         }
 
@@ -241,13 +283,13 @@ namespace IcueHaBridge.Icue
                     }
                     if (!CorsairLightingSDK.SetLedsColorsBufferByDeviceIndex(device.Index, colors))
                     {
-                        MarkDisconnectedIfServerGone();
+                        MarkLost("writing to " + device.Model + " failed");
                         return false;
                     }
                 }
                 if (!CorsairLightingSDK.SetLedsColorsFlushBuffer())
                 {
-                    MarkDisconnectedIfServerGone();
+                    MarkLost("flushing the colours failed");
                     return false;
                 }
                 return true;
@@ -295,16 +337,15 @@ namespace IcueHaBridge.Icue
         }
 
         /// <summary>
-        /// Notes that iCUE is gone so that the loop stops writing and tries to reconnect.
+        /// Any refused call means the link to iCUE is no longer trustworthy, most often because it
+        /// was restarted. Rather than guess which errors are recoverable, the connection is dropped
+        /// and built again, which also picks up devices that moved in the meantime.
         /// </summary>
-        private void MarkDisconnectedIfServerGone()
+        private void MarkLost(string reason)
         {
-            if (CorsairLightingSDK.GetLastError() == CorsairError.ServerNotFound)
-            {
-                IsConnected = false;
-                isInFront = false;
-                ProtocolSummary = "iCUE is no longer running";
-            }
+            IsConnected = false;
+            isInFront = false;
+            ProtocolSummary = reason + " (" + CorsairLightingSDK.GetLastError() + ")";
         }
 
         /// <summary>Last error reported by the SDK, for the log.</summary>
