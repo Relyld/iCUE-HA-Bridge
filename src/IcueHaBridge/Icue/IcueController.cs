@@ -77,7 +77,8 @@ namespace IcueHaBridge.Icue
                 {
                     CorsairDeviceInfo info = CorsairLightingSDK.GetDeviceInfo(index);
                     CorsairLedPositions positions = CorsairLightingSDK.GetLedPositionsByDeviceIndex(index);
-                    if (info == null || positions == null || positions.LedPosition == null || positions.LedPosition.Length == 0)
+                    // Both of these are structs, so only the LED array can actually be missing.
+                    if (positions.LedPosition == null || positions.LedPosition.Length == 0)
                     {
                         continue;
                     }
