@@ -312,6 +312,10 @@ namespace IcueHaBridge.Effects
                 needsRedraw = true;
             }
 
+            foreach (string line in controller.LastDiagnostics)
+            {
+                logger.LogInformation("Device detail {Detail}", line);
+            }
             logger.LogInformation("Connected to iCUE ({Protocol}), {Count} device(s): {Models}",
                 controller.ProtocolSummary, found.Count, string.Join(", ", found.ConvertAll(d => d.Model)));
 

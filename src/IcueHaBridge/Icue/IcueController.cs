@@ -1,6 +1,8 @@
 using CUESDK;
 using System;
 using System.Collections.Generic;
+using System.Reflection;
+using System.Text;
 
 namespace IcueHaBridge.Icue
 {
@@ -67,6 +69,7 @@ namespace IcueHaBridge.Icue
             lock (sync)
             {
                 List<IcueDevice> devices = new List<IcueDevice>();
+                LastDiagnostics.Clear();
                 if (!IsConnected)
                 {
                     return devices;
@@ -86,10 +89,75 @@ namespace IcueHaBridge.Icue
                     IcueLed[] leds = BuildLeds(positions.LedPosition);
                     string model = string.IsNullOrWhiteSpace(info.Model) ? "Device " + index : info.Model.Trim();
                     devices.Add(new IcueDevice(index, model, info.DeviceId, leds, IcueDevice.Slugify(model)));
+                    LastDiagnostics.Add(Describe(index, model, info, positions.LedPosition));
                 }
                 IcueDevice.MakeSlugsUnique(devices);
                 return devices;
             }
+        }
+
+        /// <summary>
+        /// One line per device describing exactly what the SDK reported, written to the log after
+        /// every enumeration. This is what tells us whether a zone we cannot light is missing from
+        /// the SDK or merely mishandled here.
+        /// </summary>
+        public List<string> LastDiagnostics { get; } = new List<string>();
+
+        /// <summary>
+        /// Describes a device without assuming which fields the SDK wrapper exposes, so that the
+        /// log stays useful whatever the wrapper version.
+        /// </summary>
+        private static string Describe(int index, string model, CorsairDeviceInfo info, CorsairLedPosition[] positions)
+        {
+            StringBuilder builder = new StringBuilder();
+            builder.Append('[').Append(index).Append("] ").Append(model);
+            builder.Append(" | reported by the SDK: ");
+
+            Type type = info.GetType();
+            foreach (FieldInfo field in type.GetFields(BindingFlags.Public | BindingFlags.Instance))
+            {
+                Append(builder, field.Name, SafeValue(field, info));
+            }
+            foreach (PropertyInfo property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+            {
+                if (property.GetIndexParameters().Length == 0)
+                {
+                    Append(builder, property.Name, SafeValue(property, info));
+                }
+            }
+
+            builder.Append("| positions returned: ").Append(positions.Length);
+            if (positions.Length > 0 && positions.Length <= 40)
+            {
+                builder.Append(" (");
+                for (int i = 0; i < positions.Length; i++)
+                {
+                    if (i > 0) { builder.Append(", "); }
+                    builder.Append(positions[i].LedId);
+                }
+                builder.Append(')');
+            }
+            return builder.ToString();
+        }
+
+        private static void Append(StringBuilder builder, string name, string value)
+        {
+            if (value != null)
+            {
+                builder.Append(name).Append('=').Append(value).Append(' ');
+            }
+        }
+
+        private static string SafeValue(FieldInfo field, object target)
+        {
+            try { object value = field.GetValue(target); return value == null ? "null" : value.ToString(); }
+            catch (Exception) { return null; }
+        }
+
+        private static string SafeValue(PropertyInfo property, object target)
+        {
+            try { object value = property.GetValue(target); return value == null ? "null" : value.ToString(); }
+            catch (Exception) { return null; }
         }
 
         /// <summary>
